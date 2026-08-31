@@ -22,6 +22,7 @@ jobs:
       - name: check and notify
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          NTFY_TOPIC_FRIENDS: ${{ secrets.NTFY_TOPIC_FRIENDS }}
           # 通知対象（カバン・財布系のみ）。変更したいときはこの2行を編集
           INCLUDE_KW: "バッグ|リュック|バックパック|財布|ウォレット|ポシェット|クラッチ|トート|ボリードポーチ"
           EXCLUDE_KW: "馬|犬用|ブラッシングキット"
@@ -54,12 +55,14 @@ jobs:
               # 少数なら1商品1通知（タップでその商品ページが開く）
               echo "$URLS" | while read -r U; do
                 NAME=$(echo "$U" | sed 's|.*/product/||; s|/$||')
-                jq -n --arg t "$NTFY_TOPIC" \
-                      --arg title "🆕 Hermès新着" \
-                      --arg m "$NAME" \
-                      --arg c "$U" \
-                      '{topic:$t, title:$title, message:$m, click:$c, priority:4, tags:["bell"]}' \
-                  | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+                for T in $NTFY_TOPIC $NTFY_TOPIC_FRIENDS; do
+                  jq -n --arg t "$T" \
+                        --arg title "🆕 Hermès新着" \
+                        --arg m "$NAME" \
+                        --arg c "$U" \
+                        '{topic:$t, title:$title, message:$m, click:$c, priority:4, tags:["bell"]}' \
+                    | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+                done
                 sleep 1
               done
             else
@@ -69,11 +72,13 @@ jobs:
               EXTRA=""
               [ "$N" -gt 8 ] && EXTRA=$'\n'"...他 $((N-8)) 件"
               BODY=$(printf '%s\n\n%s%s' "$MSG" "$LINKS" "$EXTRA")
-              jq -n --arg t "$NTFY_TOPIC" \
-                    --arg title "🆕 Hermès新着 ${N}件" \
-                    --arg m "$BODY" \
-                    '{topic:$t, title:$title, message:$m, priority:4, tags:["bell"]}' \
-                | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+              for T in $NTFY_TOPIC $NTFY_TOPIC_FRIENDS; do
+                jq -n --arg t "$T" \
+                      --arg title "🆕 Hermès新着 ${N}件" \
+                      --arg m "$BODY" \
+                      '{topic:$t, title:$title, message:$m, priority:4, tags:["bell"]}' \
+                  | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+              done
             fi
             echo "notified"
           fi
