@@ -1,0 +1,63 @@
+# Hermes JPのサイトマップを5分ごとにチェックし、新着/再入荷を検出したらntfyでスマホに通知する
+name: watch
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: watch
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: check and notify
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          OUT=$(mktemp)
+          if ! bash check.sh > "$OUT" 2>&1; then
+            echo "fetch failed (site unreachable or blocked):"
+            cat "$OUT"
+            exit 0
+          fi
+          cat "$OUT"
+
+          if head -1 "$OUT" | grep -q '^NEW_PRODUCTS'; then
+            N=$(head -1 "$OUT" | grep -o '[0-9]\+')
+            URLS=$(tail -n +2 "$OUT")
+            NOW=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')
+            { echo "== $NOW =="; echo "$URLS"; } >> "reports/$(TZ=Asia/Tokyo date '+%Y-%m-%d').txt"
+
+            NAMES=$(echo "$URLS" | sed 's|.*/product/||; s|/$||' | head -8)
+            EXTRA=""
+            [ "$N" -gt 8 ] && EXTRA="...他 $((N-8)) 件"
+            CLICK=$(echo "$URLS" | head -1)
+            MSG=$(printf '%s\n%s' "$NAMES" "$EXTRA")
+            jq -n --arg t "$NTFY_TOPIC" \
+                  --arg title "🆕 Hermès新着 ${N}件" \
+                  --arg m "$MSG" \
+                  --arg c "$CLICK" \
+                  '{topic:$t, title:$title, message:$m, click:$c, priority:4, tags:["bell"]}' \
+              | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+            echo "notified"
+          fi
+
+          git config user.name "hermes-watch-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add state reports
+          if git diff --cached --quiet; then
+            echo "no changes"
+          else
+            git commit -m "update $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
+            git pull --rebase --quiet
+            git push
+          fi
