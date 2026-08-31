@@ -37,17 +37,31 @@ jobs:
             NOW=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')
             { echo "== $NOW =="; echo "$URLS"; } >> "reports/$(TZ=Asia/Tokyo date '+%Y-%m-%d').txt"
 
-            NAMES=$(echo "$URLS" | sed 's|.*/product/||; s|/$||' | head -8)
-            EXTRA=""
-            [ "$N" -gt 8 ] && EXTRA="...他 $((N-8)) 件"
-            CLICK=$(echo "$URLS" | head -1)
-            MSG=$(printf '%s\n%s' "$NAMES" "$EXTRA")
-            jq -n --arg t "$NTFY_TOPIC" \
-                  --arg title "🆕 Hermès新着 ${N}件" \
-                  --arg m "$MSG" \
-                  --arg c "$CLICK" \
-                  '{topic:$t, title:$title, message:$m, click:$c, priority:4, tags:["bell"]}' \
-              | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+            if [ "$N" -le 5 ]; then
+              # 少数なら1商品1通知（タップでその商品ページが開く）
+              echo "$URLS" | while read -r U; do
+                NAME=$(echo "$U" | sed 's|.*/product/||; s|/$||')
+                jq -n --arg t "$NTFY_TOPIC" \
+                      --arg title "🆕 Hermès新着" \
+                      --arg m "$NAME" \
+                      --arg c "$U" \
+                      '{topic:$t, title:$title, message:$m, click:$c, priority:4, tags:["bell"]}' \
+                  | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+                sleep 1
+              done
+            else
+              # 多数ならまとめて1通（本文に商品名とURLを並べる）
+              MSG=$(echo "$URLS" | head -8 | sed 's|.*/product/|・|; s|/$||')
+              LINKS=$(echo "$URLS" | head -8)
+              EXTRA=""
+              [ "$N" -gt 8 ] && EXTRA=$'\n'"...他 $((N-8)) 件"
+              BODY=$(printf '%s\n\n%s%s' "$MSG" "$LINKS" "$EXTRA")
+              jq -n --arg t "$NTFY_TOPIC" \
+                    --arg title "🆕 Hermès新着 ${N}件" \
+                    --arg m "$BODY" \
+                    '{topic:$t, title:$title, message:$m, priority:4, tags:["bell"]}' \
+                | curl -s -X POST -H "Content-Type: application/json" -d @- https://ntfy.sh > /dev/null
+            fi
             echo "notified"
           fi
 
